@@ -130,7 +130,7 @@ mem_init(void)
 	i386_detect_memory();
 
 	// Remove this line when you're ready to test this function.
-	//panic("mem_init: This function is not finished\n");
+	panic("mem_init: This function is not finished\n");
 
 	//////////////////////////////////////////////////////////////////////
 	// create initial page directory.
@@ -304,8 +304,26 @@ page_init(void)
 struct PageInfo *
 page_alloc(int alloc_flags)
 {
-	// Fill this function in
-	return 0;
+	struct PageInfo *nextfree = page_free_list;
+	//if you have a free spot
+	if(nextfree){
+		//update page_free_list to be next link
+		page_free_list = nextfree->pp_link;
+
+		//set page as no longer open
+		nextfree->pp_ref = 1;
+		nextfree->pp_link = NULL;
+
+		//if flags set, fill with '\0' bytes
+		if(alloc_flags & ALLOC_ZERO){
+			void *addr = page2kva(nextfree);
+			memset(addr, '\0', PGSIZE);
+		}
+
+		return nextfree;
+	}else{ //if there are no free spots, return NULL
+		return NULL;
+	}
 }
 
 //
