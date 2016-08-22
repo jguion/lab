@@ -88,8 +88,8 @@ boot_alloc(uint32_t n)
 	// which points to the end of the kernel's bss segment:
 	// the first virtual address that the linker did *not* assign
 	// to any kernel code or global variables.
+	extern char end[];
 	if (!nextfree) {
-		extern char end[];
 		nextfree = ROUNDUP((char *) end, PGSIZE);
 	}
 
@@ -98,8 +98,17 @@ boot_alloc(uint32_t n)
 	// to a multiple of PGSIZE.
 	//
 	// LAB 2: Your code here.
+	result = nextfree;
+	if(n > 0){
+		nextfree += ROUNDUP(n, PGSIZE);
 
-	return NULL;
+		//if out of memory -> PANIC
+		if(nextfree > end){
+			panic("boot_alloc: Out of physical memory");
+		}
+	}
+
+	return result;
 }
 
 // Set up a two-level page table:
@@ -121,7 +130,7 @@ mem_init(void)
 	i386_detect_memory();
 
 	// Remove this line when you're ready to test this function.
-	panic("mem_init: This function is not finished\n");
+	//panic("mem_init: This function is not finished\n");
 
 	//////////////////////////////////////////////////////////////////////
 	// create initial page directory.
@@ -145,6 +154,9 @@ mem_init(void)
 	// to initialize all fields of each struct PageInfo to 0.
 	// Your code goes here:
 
+	uint32_t page_memory_size = sizeof(struct PageInfo) * npages;
+	pages = (struct PageInfo *) boot_alloc(page_memory_size);
+	memset(pages, 0, page_memory_size);
 
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
@@ -215,6 +227,23 @@ mem_init(void)
 	check_page_installed_pgdir();
 }
 
+
+//helper method to determine if page is in free memory zone.
+bool is_free_memory(i){
+	if(i == 0){
+		return false;
+	}
+	if(i >= PGNUM(IOPHYSMEM) && i <= PGNUM(EXTPHYSMEM)){
+		return false;
+	}
+	if(i >= PGNUM(PADDR((void *) KERNBASE)) && i <= PGNUM(PADDR(boot_alloc(0)))){
+		return false;
+	}
+	else{
+		return true;
+	}
+}
+
 // --------------------------------------------------------------
 // Tracking of physical pages.
 // The 'pages' array has one 'struct PageInfo' entry per physical page.
@@ -249,9 +278,14 @@ page_init(void)
 	// free pages!
 	size_t i;
 	for (i = 0; i < npages; i++) {
-		pages[i].pp_ref = 0;
-		pages[i].pp_link = page_free_list;
-		page_free_list = &pages[i];
+		if(is_free_memory(i)){
+			pages[i].pp_ref = 0;
+			pages[i].pp_link = page_free_list;
+			page_free_list = &pages[i];
+		}else{
+			pages[i].pp_ref = 0;
+			pages[i].pp_link = NULL;
+		}
 	}
 }
 
