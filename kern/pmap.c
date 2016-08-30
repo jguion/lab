@@ -444,7 +444,27 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 int
 page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 {
-	// Fill this function in
+	//get pte at va
+	pte_t *pte = pgdir_walk(*pgdir, va, 1);
+	//return -E_NO_MEM, if page table couldn't be allocated
+	if(pte == NULL){
+		return -E_NO_MEM;
+	}
+
+	//increment pp->ref
+	pp->ref++;
+
+	//Do bitwise & to check if an entry is already present at this location
+	if(*pte & PTE_P){
+		//if it is, remove it. Remove also invalidates TLB
+		page_remove(pgdir, va);
+	}
+
+	//get physical address for page
+	physaddr_t pa = page2pa(pp);
+	//set permissions of PTE using bitwise OR. Also set pte to present.
+	*pte = pa | perm | PTE_P;
+
 	return 0;
 }
 
@@ -462,8 +482,25 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
-	// Fill this function in
-	return NULL;
+	//get pte at va. Should not create new table if none exists.
+	pte_t *pte = pgdir_walk(*pgdir, va, 0);
+
+	//Return NULL if there is no page mapped at va.
+	if(*pte == NULL || (*pte & PTE_P) == NULL){
+		return NULL;
+	}
+
+	//get physical address at PTE
+	physaddr_t pa = PTE_ADDR(pte);
+	//get page at physical address
+	PageInfo *page = pa2page(pa);
+	// If pte_store is not zero, then we store in it the address
+	// of the pte for this page.
+	if(pte_store){
+		*pte = page;
+		return pte;
+	}
+	return page;
 }
 
 //
@@ -484,7 +521,19 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 void
 page_remove(pde_t *pgdir, void *va)
 {
-	// Fill this function in
+	pte_t *pte = 1;
+	//lookup page and store the page table entry at PTE
+	PageInfo *page = page_lookup(pgdir, va, pte);
+	//if page doesn't exist, do nothing silently
+	if(page){
+		//- The ref count on the physical page should decrement.
+		//- The physical page should be freed if the refcount reaches 0.
+		page_decref(*page);
+		//- The pg table entry corresponding to 'va' should be set to 0.
+		*pte = 0;
+		//- The TLB must be invalidated if you remove an entry from the page table.
+		tlb_invalidate(pgdir, va);
+	}
 }
 
 //
