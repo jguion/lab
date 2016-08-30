@@ -397,16 +397,11 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
 	//Fill this function in
 
-	//Search for the page table for the linear address 'va'
-	//Start at pgdir address
+	pde_t kva = pgdir[PDX(va)];
+	pde_t pte = kva[PTX(va)];
 
-	for(int i = 0;"until end of page list is reached";i++){
-        if(pgdir + (i * PGSIZE) == va){
-            //Page found
-            //***Need to finish code here***
-            page2pa(va); //Get a physical page address
-            return "return page table entry for address 'va'"
-        }
+	if(pte & PTE_P){
+        return pte;
 	}
 
 	//Page doesn't exist yet (implied when we drop out of the for loop above)
@@ -422,11 +417,11 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
             //Page alloc sucess
             //new page's ref count is incremeneted
             newPage->pp_ref++;
-            //page is cleared
             //return page table entry for address 'va'/new page
-            //***Need to finish code here***
-            page2pa(newPage); //Get a physical page address
-            return
+            kva = page2kva(newPage);
+            pte = kva[PTX(va)];
+
+            return pte;
         }
         else{
             //Page alloc failed
@@ -454,8 +449,14 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 {
 	// Fill this function in
 	//Map out va -> va + size to pa -> pa + size
-	int numPages = size / PGSIZE;
-	pgdir_walk(pgdir,va,"create");
+	int numPages = ROUNDUP(size / PGSIZE);
+	pde_t * pte;
+
+	for(int i = 0; i < numPages; i++){
+        * pte = pgdir_walk(pgdir,va,1);
+        * pte = pa + (i * PGSIZE) | perm | PTE_P;
+	}
+
 }
 
 //
