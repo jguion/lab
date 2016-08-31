@@ -395,8 +395,42 @@ page_decref(struct PageInfo* pp)
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-	// Fill this function in
-	return NULL;
+	//Fill this function in
+
+	pde_t kva = pgdir[PDX(va)];
+	pde_t pte = kva[PTX(va)];
+
+	if(pte & PTE_P){
+        return pte;
+	}
+
+	//Page doesn't exist yet (implied when we drop out of the for loop above)
+	//Not allowed to create a new page
+	if(create == false){
+        return NULL;
+	}
+	else{
+        //allocate a new page with page_alloc, pass a 1 to have the page cleared w/ '\0' bytes
+        struct PageInfo * newPage = page_alloc(1);
+
+        if(newPage != NULL){
+            //Page alloc sucess
+            //new page's ref count is incremeneted
+            newPage->pp_ref++;
+            //return page table entry for address 'va'/new page
+            kva = page2kva(newPage);
+            pte = kva[PTX(va)];
+
+            return pte;
+        }
+        else{
+            //Page alloc failed
+            return NULL;
+        }
+
+
+	}
+
 }
 
 //
@@ -414,6 +448,15 @@ static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
 	// Fill this function in
+	//Map out va -> va + size to pa -> pa + size
+	int numPages = ROUNDUP(size / PGSIZE);
+	pde_t * pte;
+
+	for(int i = 0; i < numPages; i++){
+        * pte = pgdir_walk(pgdir,va,1);
+        * pte = pa + (i * PGSIZE) | perm | PTE_P;
+	}
+
 }
 
 //
