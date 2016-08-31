@@ -395,41 +395,51 @@ page_decref(struct PageInfo* pp)
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-	//Fill this function in
+	//get page and directory index
+	int d = PDX(va);
+	int p = PTX(va);
+	pde_t *pde;
+	pde_t *pt;
+	//Lookup page table from directory index in directory table
+	pde = &pgdir[d];
 
-	pde_t kva = pgdir[PDX(va)];
-	pde_t pte = kva[PTX(va)];
-
-	if(pte & PTE_P){
-        return pte;
-	}
-
-	//Page doesn't exist yet (implied when we drop out of the for loop above)
-	//Not allowed to create a new page
-	if(create == false){
-        return NULL;
+	//Check if entry already exists.
+	if(*pde & PTE_P){
+		//Get physical address from page directory entry and
+		//translate to kernel virtual address where page table sits.
+		pt = KADDR(PTE_ADDR(pde));
 	}
 	else{
-        //allocate a new page with page_alloc, pass a 1 to have the page cleared w/ '\0' bytes
-        struct PageInfo * newPage = page_alloc(1);
-
-        if(newPage != NULL){
-            //Page alloc sucess
-            //new page's ref count is incremeneted
-            newPage->pp_ref++;
-            //return page table entry for address 'va'/new page
-            kva = page2kva(newPage);
-            pte = kva[PTX(va)];
-
-            return pte;
-        }
-        else{
-            //Page alloc failed
-            return NULL;
-        }
-
-
+		//Page doesn't exist yet (implied when we drop out of the for loop above)
+		//Not allowed to create a new page
+		if(create == false){
+	        return NULL;
+		}
+		else{
+	        //allocate a new page with page_alloc, pass a 1 to have the page cleared w/ '\0' bytes
+	        struct PageInfo *newPage = page_alloc(1);
+	        if(newPage != NULL){
+	            //Page alloc sucess
+	            //new page's ref count is incremeneted
+	            newPage->pp_ref++;
+	            //return page table entry for address 'va'/new page
+							//get physical address for page
+							physaddr_t pa = page2pa(newPage);
+							//set page at location in page directory index
+							pde[p] = pa | PTE_P;
+							//get kernal virtual address for new page entry
+	            pt = page2kva(newPage);
+	        }
+	        else{
+	            //Page alloc failed
+	            return NULL;
+	        }
+		}
 	}
+
+	//Lookup page table entry in from page in page table
+	pde_t *pte = &pt[p];
+	return pte;
 
 }
 
@@ -449,12 +459,15 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 {
 	// Fill this function in
 	//Map out va -> va + size to pa -> pa + size
-	int numPages = ROUNDUP(size / PGSIZE);
-	pde_t * pte;
+	int numPages = ROUNDUP(size / PGSIZE, PGSIZE);
+	pde_t *pte;
+	int i;
+	for(i = 0; i < numPages; i++){
+        pte = pgdir_walk(pgdir,(void *) va,1);
 
-	for(int i = 0; i < numPages; i++){
-        * pte = pgdir_walk(pgdir,va,1);
-        * pte = pa + (i * PGSIZE) | perm | PTE_P;
+        *pte = pa | perm | PTE_P;
+				pa = pa + PGSIZE;
+				va = va + PGSIZE;
 	}
 
 }
@@ -488,14 +501,14 @@ int
 page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 {
 	//get pte at va
-	pte_t *pte = pgdir_walk(*pgdir, va, 1);
+	pte_t *pte = pgdir_walk(pgdir, va, 1);
 	//return -E_NO_MEM, if page table couldn't be allocated
 	if(pte == NULL){
 		return -E_NO_MEM;
 	}
 
 	//increment pp->ref
-	pp->ref++;
+	pp->pp_ref++;
 
 	//Do bitwise & to check if an entry is already present at this location
 	if(*pte & PTE_P){
@@ -526,22 +539,21 @@ struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
 	//get pte at va. Should not create new table if none exists.
-	pte_t *pte = pgdir_walk(*pgdir, va, 0);
+	pte_t *pte = pgdir_walk(pgdir, va, 0);
 
 	//Return NULL if there is no page mapped at va.
-	if(*pte == NULL || (*pte & PTE_P) == NULL){
+	if(pte == NULL || !(*pte & PTE_P)){
 		return NULL;
 	}
 
 	//get physical address at PTE
 	physaddr_t pa = PTE_ADDR(pte);
 	//get page at physical address
-	PageInfo *page = pa2page(pa);
+	struct PageInfo *page = pa2page(pa);
 	// If pte_store is not zero, then we store in it the address
 	// of the pte for this page.
 	if(pte_store){
-		*pte = page;
-		return pte;
+		*pte_store = pte;
 	}
 	return page;
 }
@@ -564,14 +576,14 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 void
 page_remove(pde_t *pgdir, void *va)
 {
-	pte_t *pte = 1;
+	pte_t *pte;
 	//lookup page and store the page table entry at PTE
-	PageInfo *page = page_lookup(pgdir, va, pte);
+	struct PageInfo *page = page_lookup(pgdir, va, &pte);
 	//if page doesn't exist, do nothing silently
 	if(page){
 		//- The ref count on the physical page should decrement.
 		//- The physical page should be freed if the refcount reaches 0.
-		page_decref(*page);
+		page_decref(page);
 		//- The pg table entry corresponding to 'va' should be set to 0.
 		*pte = 0;
 		//- The TLB must be invalidated if you remove an entry from the page table.
